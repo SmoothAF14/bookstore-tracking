@@ -1,7 +1,16 @@
 """
-health.py — Health check router.
-
-Placeholder scaffolding. GET /health to be implemented.
+routers/health.py — Health check endpoint (used by Render's health probe).
 """
+from fastapi import APIRouter
+from pydantic import BaseModel
 
-# TODO: Implement GET /health returning {"status": "ok"}.
+router = APIRouter()
+
+
+class HealthResponse(BaseModel):
+    status: str
+
+
+@router.get("/health", response_model=HealthResponse, summary="Health check")
+def health_check():
+    return {"status": "ok"}

@@ -1,5 +1,18 @@
 """
-test_health.py — Placeholder test for the health endpoint.
+test_health.py — Health endpoint tests.
 """
+from fastapi.testclient import TestClient
 
-# TODO: Assert GET /health returns 200 and {"status": "ok"}.
+from app.main import app
+
+client = TestClient(app)
+
+
+def test_health_returns_200():
+    resp = client.get("/health")
+    assert resp.status_code == 200
+
+
+def test_health_returns_ok_status():
+    resp = client.get("/health")
+    assert resp.json() == {"status": "ok"}

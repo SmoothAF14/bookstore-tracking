@@ -6,8 +6,9 @@ delivered. It uses the **Google Maps API (mock data only)** keyed off the
 address the user provides, and an **orchestrated LLM** that intelligently
 advances the tracking state and order status as the simulated shipment moves.
 
-> **Status:** Initial scaffolding only. Files below are placeholders — no
-> business logic is implemented yet.
+> **Status:** Implemented. The tracking lifecycle (start → advance → delivered)
+> runs via FastAPI endpoints and Celery auto-advance, using mock Google Maps
+> route/ETA data and an LLM orchestrator (with a deterministic fallback).
 
 ## Responsibilities
 

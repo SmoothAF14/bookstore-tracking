@@ -1,10 +1,24 @@
 """
 celery_app.py — Celery application for async tracking tasks.
-
-Placeholder scaffolding. The Celery app, broker/backend wiring, and beat
-schedule for periodic tracking-advance jobs are to be implemented.
 """
+from celery import Celery
 
-# TODO: Create Celery app pointed at CELERY_BROKER_URL / CELERY_RESULT_BACKEND.
-# TODO: Autodiscover tasks in app.tasks.
-# TODO: Define beat schedule for periodic tracking-advance / ETA recompute jobs.
+from app.core.config import settings
+
+celery_app = Celery(
+    "bookstore_tracking",
+    broker=settings.CELERY_BROKER_URL,
+    backend=settings.CELERY_RESULT_BACKEND,
+)
+
+celery_app.conf.update(
+    task_serializer="json",
+    result_serializer="json",
+    accept_content=["json"],
+    timezone="UTC",
+    enable_utc=True,
+    task_track_started=True,
+)
+
+# Discover tasks in app.tasks.*
+celery_app.autodiscover_tasks(["app.tasks"])

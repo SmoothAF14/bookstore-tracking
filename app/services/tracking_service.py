@@ -1,9 +1,104 @@
 """
-tracking_service.py — Tracking checkpoint generation.
+services/tracking_service.py — Tracking checkpoint generation + state.
 
-Placeholder scaffolding. Builds tracking checkpoints from mock map data and the
-orchestrator's decisions.
+Builds the initial tracking state (route, ETA, first checkpoint) from mock map
+data, and produces the ordered checkpoint sequence the shipment moves through.
+The orchestrator drives advancing between stages.
 """
+import logging
+from datetime import datetime, timedelta
 
-# TODO: Generate ordered tracking checkpoints (dispatched → in transit →
-#       out for delivery → delivered) from mock route/ETA data.
+from app.core import maps_client, state_store
+from app.schemas.tracking import STATUS_TO_ORDER_STATUS
+
+logger = logging.getLogger(__name__)
+
+# The ordered stages a shipment advances through.
+STAGE_ORDER = ["pending", "dispatched", "in_transit", "out_for_delivery", "delivered"]
+
+# Human-readable labels per stage.
+STAGE_LABELS = {
+    "pending": "Order confirmed",
+    "dispatched": "Dispatched from fulfilment centre",
+    "in_transit": "In transit",
+    "out_for_delivery": "Out for delivery",
+    "delivered": "Delivered",
+}
+
+
+def next_stage(status: str) -> str | None:
+    """Return the stage after `status`, or None if already delivered."""
+    try:
+        idx = STAGE_ORDER.index(status)
+    except ValueError:
+        return None
+    return STAGE_ORDER[idx + 1] if idx + 1 < len(STAGE_ORDER) else None
+
+
+def build_checkpoint(status: str, route, when: datetime | None = None) -> dict:
+    """Construct a checkpoint dict for a given stage using the mock route."""
+    when = when or datetime.utcnow()
+    location = None
+    point = None
+
+    if status == "dispatched":
+        location = route.origin.get("label")
+        point = {"lat": route.origin["lat"], "lng": route.origin["lng"], "label": location}
+    elif status == "in_transit":
+        hub = route.hubs[len(route.hubs) // 2] if route.hubs else "Regional Hub"
+        location = hub
+    elif status == "out_for_delivery":
+        location = "Local Delivery Centre"
+    elif status == "delivered":
+        location = route.destination.get("label")
+        point = {
+            "lat": route.destination["lat"],
+            "lng": route.destination["lng"],
+            "label": location,
+        }
+
+    return {
+        "status": status,
+        "label": STAGE_LABELS.get(status, status.replace("_", " ").title()),
+        "description": None,
+        "location": location,
+        "point": point,
+        "timestamp": when.isoformat(),
+        "is_current": True,
+    }
+
+
+def start_tracking(order_id: str, destination_address: str) -> dict:
+    """Initialise tracking state for an order and persist it.
+
+    Creates the route + ETA from mock maps and the first ('pending') checkpoint.
+    Returns the new state dict.
+    """
+    route = maps_client.get_route(destination_address)
+    now = datetime.utcnow()
+    eta = now + timedelta(hours=route.duration_hours)
+
+    first = build_checkpoint("pending", route, now)
+    first["label"] = STAGE_LABELS["pending"]
+
+    state = {
+        "order_id": order_id,
+        "status": "pending",
+        "order_status": STATUS_TO_ORDER_STATUS["pending"],
+        "origin": route.origin.get("label"),
+        "destination": route.destination.get("label"),
+        "distance_km": route.distance_km,
+        "duration_hours": route.duration_hours,
+        "eta": eta.isoformat(),
+        "destination_address": destination_address,
+        "checkpoints": [first],
+        "updated_at": now.isoformat(),
+    }
+    state_store.save_state(order_id, state)
+    logger.info("Started tracking for order %s → %s", order_id, destination_address)
+    return state
+
+
+def get_route_for_state(state: dict):
+    """Rebuild the mock route for an existing state (deterministic from address)."""
+    return maps_client.get_route(state.get("destination_address") or "")
