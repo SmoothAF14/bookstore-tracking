@@ -72,6 +72,10 @@ celery -A app.celery_app beat --loglevel=info
 
 ## Deployment
 
-Deploys on **Render** via `render.yaml` (Blueprint): a web service (FastAPI), a
-Celery worker, a Celery beat scheduler, and a Redis instance. A `Dockerfile` is
-included for container-based deploys.
+Deploys on **Render free tier** via `render.yaml` (Blueprint) as a **single
+Docker web service**. Render's free tier has no separate `worker` service and
+no managed Redis, so — exactly like `bookstore-backend` — one container runs the
+FastAPI app + Celery worker + Celery beat together under **supervisord**
+(`supervisord.conf`), and Celery reuses the **shared Render Redis** instance via
+`REDIS_URL` (the same Redis the Django backend uses). No new Redis is
+provisioned.
