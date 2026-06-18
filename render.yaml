@@ -1,12 +1,17 @@
 services:
   # ---------------------------------------------------------------------------
-  # FastAPI web service
+  # Single free-tier web service.
+  #
+  # Render's free tier does NOT include background `worker` services or managed
+  # Redis. So — exactly like bookstore-backend — this one container runs the
+  # FastAPI app + the Celery worker + Celery beat together under supervisord,
+  # and Celery reuses the SHARED Render Redis instance via REDIS_URL (the same
+  # instance the Django backend uses). No new Redis is provisioned here.
   # ---------------------------------------------------------------------------
   - type: web
     name: bookstore-tracking
-    env: python
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    env: docker
+    dockerfilePath: ./Dockerfile
     healthCheckPath: /health
     envVars:
       - key: APP_ENV
@@ -19,17 +24,15 @@ services:
         sync: false
       - key: CORS_ORIGINS
         sync: false
-      # Celery broker/backend — from the managed Redis instance below.
+      # Celery broker/backend reuse the SHARED Redis (same as the Django
+      # backend). Set REDIS_URL to that instance's connection string. Broker
+      # defaults to REDIS_URL; results stay OFF to save memory.
+      - key: REDIS_URL
+        sync: false
       - key: CELERY_BROKER_URL
-        fromService:
-          type: redis
-          name: bookstore-tracking-redis
-          property: connectionString
+        sync: false
       - key: CELERY_RESULT_BACKEND
-        fromService:
-          type: redis
-          name: bookstore-tracking-redis
-          property: connectionString
+        sync: false
       # LLM (orchestration loop)
       - key: LLM_API_KEY
         sync: false
@@ -53,69 +56,3 @@ services:
         value: user_id
       - key: REQUIRE_AUTH
         value: "True"
-
-  # ---------------------------------------------------------------------------
-  # Celery worker — executes scheduled tracking tasks asynchronously
-  # ---------------------------------------------------------------------------
-  - type: worker
-    name: bookstore-tracking-worker
-    env: python
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "celery -A app.celery_app worker --loglevel=info"
-    envVars:
-      - key: CELERY_BROKER_URL
-        fromService:
-          type: redis
-          name: bookstore-tracking-redis
-          property: connectionString
-      - key: CELERY_RESULT_BACKEND
-        fromService:
-          type: redis
-          name: bookstore-tracking-redis
-          property: connectionString
-      - key: DJANGO_API_URL
-        sync: false
-      - key: DELIVERY_SERVICE_URL
-        sync: false
-      - key: LLM_API_KEY
-        sync: false
-      - key: LLM_BASE_URL
-        value: https://openrouter.ai/api/v1
-      - key: LLM_MODEL
-        value: deepseek/deepseek-v3.2
-      - key: LLM_MAX_TOKENS
-        value: "1024"
-      - key: GOOGLE_MAPS_API_KEY
-        sync: false
-      - key: GOOGLE_MAPS_USE_MOCK
-        value: "True"
-      - key: JWT_SECRET
-        sync: false
-
-  # ---------------------------------------------------------------------------
-  # Celery beat — schedules periodic tracking-advance / ETA recompute jobs
-  # ---------------------------------------------------------------------------
-  - type: worker
-    name: bookstore-tracking-beat
-    env: python
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "celery -A app.celery_app beat --loglevel=info"
-    envVars:
-      - key: CELERY_BROKER_URL
-        fromService:
-          type: redis
-          name: bookstore-tracking-redis
-          property: connectionString
-      - key: CELERY_RESULT_BACKEND
-        fromService:
-          type: redis
-          name: bookstore-tracking-redis
-          property: connectionString
-
-  # ---------------------------------------------------------------------------
-  # Redis — Celery broker + result backend
-  # ---------------------------------------------------------------------------
-  - type: redis
-    name: bookstore-tracking-redis
-    ipAllowList: []
-    plan: free
