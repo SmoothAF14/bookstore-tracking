@@ -1,0 +1,26 @@
+# Web framework
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+
+# Data validation
+pydantic==2.10.4
+pydantic-settings==2.7.0
+
+# Async task scheduling/execution
+celery==5.4.0
+redis==5.2.1
+
+# HTTP client (tool calls into the Django backend / delivery service)
+httpx==0.28.1
+
+# Environment
+python-decouple==3.8
+
+# LLM SDK (orchestration loop)
+openai==1.59.6
+
+# JWT verification — validates access tokens issued by the Django backend
+pyjwt==2.10.1
+
+# Google Maps API client (mock data)
+googlemaps==4.10.0
