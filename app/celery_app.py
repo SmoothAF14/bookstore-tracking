@@ -11,7 +11,7 @@ from celery import Celery
 
 # Broker defaults to the shared Redis (REDIS_URL); results stay OFF to save
 # memory on the free tier.
-_broker = os.getenv("CELERY_BROKER_URL") or os.getenv("REDIS_URL", "redis://localhost:6379")
+_broker = os.getenv("CELERY_BROKER_URL") or os.getenv("REDIS_URL", "redis://red-d8ha1s77f7vs73cag08g:6379")
 _backend = os.getenv("CELERY_RESULT_BACKEND") or None
 
 celery = Celery("bookstore_tracking", broker=_broker, backend=_backend)
