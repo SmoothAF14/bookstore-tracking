@@ -57,7 +57,7 @@ def start_tracking(
         except Exception as exc:  # noqa: BLE001 — broker down shouldn't fail the request
             logger.warning("Could not enqueue auto-advance for %s: %s", request.order_id, exc)
 
-    return state
+    return tracking_service.hydrate(state)
 
 
 @router.get("/{order_id}", response_model=TrackingStateResponse, summary="Get tracking state")
@@ -65,7 +65,7 @@ def get_tracking(order_id: str, user: AuthenticatedUser = Depends(require_user))
     state = state_store.load_state(order_id)
     if not state:
         raise HTTPException(status_code=404, detail="No tracking found for this order.")
-    return state
+    return tracking_service.hydrate(state)
 
 
 @router.post("/{order_id}/advance", response_model=AdvanceResponse, summary="Advance one step")

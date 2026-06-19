@@ -16,6 +16,16 @@ logger = logging.getLogger(__name__)
 # The ordered stages a shipment advances through.
 STAGE_ORDER = ["pending", "dispatched", "in_transit", "out_for_delivery", "delivered"]
 
+# How far along the origin→destination line the shipment is at each stage.
+# Used to compute a live map position from the mock route.
+STAGE_PROGRESS = {
+    "pending": 0.0,
+    "dispatched": 0.08,
+    "in_transit": 0.5,
+    "out_for_delivery": 0.85,
+    "delivered": 1.0,
+}
+
 # Human-readable labels per stage.
 STAGE_LABELS = {
     "pending": "Order confirmed",
@@ -87,6 +97,8 @@ def start_tracking(order_id: str, destination_address: str) -> dict:
         "order_status": STATUS_TO_ORDER_STATUS["pending"],
         "origin": route.origin.get("label"),
         "destination": route.destination.get("label"),
+        "origin_point": route.origin,
+        "destination_point": route.destination,
         "distance_km": route.distance_km,
         "duration_hours": route.duration_hours,
         "eta": eta.isoformat(),
@@ -97,6 +109,44 @@ def start_tracking(order_id: str, destination_address: str) -> dict:
     state_store.save_state(order_id, state)
     logger.info("Started tracking for order %s → %s", order_id, destination_address)
     return state
+
+
+def _lerp(a: float, b: float, t: float) -> float:
+    return a + (b - a) * t
+
+
+def compute_current_point(state: dict) -> dict | None:
+    """Interpolate the shipment's live position along the mock route.
+
+    Linearly blends origin → destination by the current stage's progress so the
+    map can show the parcel moving as it advances. Returns None if the route's
+    geo points aren't available (e.g. tracking started before they were stored).
+    """
+    origin = state.get("origin_point")
+    dest = state.get("destination_point")
+    if not origin or not dest:
+        return None
+    t = STAGE_PROGRESS.get(state.get("status"), 0.0)
+    if t <= 0:
+        label = origin.get("label")
+    elif t >= 1:
+        label = dest.get("label")
+    else:
+        label = "In transit"
+    return {
+        "lat": round(_lerp(origin["lat"], dest["lat"], t), 5),
+        "lng": round(_lerp(origin["lng"], dest["lng"], t), 5),
+        "label": label,
+    }
+
+
+def hydrate(state: dict | None) -> dict | None:
+    """Return a copy of the state augmented with the live current_point."""
+    if not state:
+        return state
+    enriched = dict(state)
+    enriched["current_point"] = compute_current_point(state)
+    return enriched
 
 
 def get_route_for_state(state: dict):

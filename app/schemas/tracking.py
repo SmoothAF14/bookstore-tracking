@@ -73,6 +73,10 @@ class TrackingStateResponse(BaseModel):
     destination: Optional[str] = None
     distance_km: Optional[float] = None
     eta: Optional[datetime] = Field(None, description="Estimated delivery time")
+    # Geo points for map rendering (mock coordinates, real map tiles client-side).
+    origin_point: Optional[GeoPoint] = Field(None, description="Fulfilment centre coordinates")
+    destination_point: Optional[GeoPoint] = Field(None, description="Delivery destination coordinates")
+    current_point: Optional[GeoPoint] = Field(None, description="Live shipment position for this stage")
     checkpoints: list[TrackingCheckpoint] = Field(default_factory=list)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
