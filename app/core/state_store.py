@@ -23,7 +23,7 @@ def _redis() -> redis.Redis:
     global _client
     if _client is None:
         _client = redis.from_url(
-            settings.CELERY_RESULT_BACKEND, decode_responses=True
+            settings.redis_url, decode_responses=True
         )
     return _client
 

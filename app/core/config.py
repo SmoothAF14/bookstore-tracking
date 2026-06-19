@@ -16,10 +16,35 @@ class Settings(BaseSettings):
     DELIVERY_SERVICE_URL: str = 'http://localhost:8004'
 
     # ------------------------------------------------------------------
-    # Celery — broker + result backend (Redis)
+    # Redis / Celery — broker + result backend + tracking state store.
+    #
+    # On Render we provision a single managed Redis instance. Depending on how
+    # it's wired, the connection string may arrive as REDIS_URL (Render's
+    # default key name) OR as CELERY_BROKER_URL / CELERY_RESULT_BACKEND. We
+    # accept any of them and fall back to localhost only for local dev, so the
+    # deployed service never silently points at localhost.
     # ------------------------------------------------------------------
-    CELERY_BROKER_URL:    str = 'redis://localhost:6379/0'
-    CELERY_RESULT_BACKEND: str = 'redis://localhost:6379/1'
+    REDIS_URL:             str = ''
+    CELERY_BROKER_URL:     str = ''
+    CELERY_RESULT_BACKEND: str = ''
+
+    @property
+    def celery_broker_url(self) -> str:
+        return self.CELERY_BROKER_URL or self.REDIS_URL or 'redis://localhost:6379/0'
+
+    @property
+    def celery_result_backend(self) -> str:
+        return self.CELERY_RESULT_BACKEND or self.REDIS_URL or 'redis://localhost:6379/1'
+
+    @property
+    def redis_url(self) -> str:
+        """Connection string for the tracking state store (shares managed Redis)."""
+        return (
+            self.REDIS_URL
+            or self.CELERY_RESULT_BACKEND
+            or self.CELERY_BROKER_URL
+            or 'redis://localhost:6379/0'
+        )
 
     # ------------------------------------------------------------------
     # LLM provider (orchestration loop) — OpenAI-compatible API (OpenRouter).
