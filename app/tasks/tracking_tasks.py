@@ -42,7 +42,12 @@ def recompute_eta(order_id: str):
         return {"order_id": order_id, "updated": False}
 
     route = tracking_service.get_route_for_state(state)
-    eta = datetime.utcnow() + timedelta(hours=route.duration_hours)
+    # Match start_tracking: while still pending the ETA includes the dispatch
+    # lead; once the parcel is dispatched, the lead has already elapsed so the
+    # remaining ETA is just travel time. Either way it never precedes dispatch.
+    from app.core.config import settings
+    lead = settings.DISPATCH_LEAD_HOURS if state.get("status") == "pending" else 0
+    eta = datetime.utcnow() + timedelta(hours=lead + route.duration_hours)
     state["eta"] = eta.isoformat()
     state_store.save_state(order_id, state)
     return {"order_id": order_id, "updated": True, "eta": state["eta"]}

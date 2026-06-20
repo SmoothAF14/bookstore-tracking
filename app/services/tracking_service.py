@@ -9,6 +9,7 @@ import logging
 from datetime import datetime, timedelta
 
 from app.core import maps_client, state_store
+from app.core.config import settings
 from app.schemas.tracking import STATUS_TO_ORDER_STATUS
 
 logger = logging.getLogger(__name__)
@@ -86,7 +87,10 @@ def start_tracking(order_id: str, destination_address: str) -> dict:
     """
     route = maps_client.get_route(destination_address)
     now = datetime.utcnow()
-    eta = now + timedelta(hours=route.duration_hours)
+    # ETA = dispatch lead time (parcel leaves the store) + travel time. Anchoring
+    # to dispatch (not "now") keeps the ETA AFTER the delivery bot's dispatch
+    # time — an order can't arrive before it's dispatched.
+    eta = now + timedelta(hours=settings.DISPATCH_LEAD_HOURS + route.duration_hours)
 
     first = build_checkpoint("pending", route, now)
     first["label"] = STAGE_LABELS["pending"]

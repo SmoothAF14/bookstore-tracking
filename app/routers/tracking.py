@@ -72,3 +72,32 @@ def get_tracking(order_id: str, user: AuthenticatedUser = Depends(require_user))
 def advance_now(order_id: str, user: AuthenticatedUser = Depends(require_user)):
     """Advance tracking one stage immediately (manual trigger / testing)."""
     return orchestrator.advance(order_id, user.access_token)
+
+
+@router.post(
+    "/{order_id}/fast-forward",
+    response_model=TrackingStateResponse,
+    summary="Advance through ALL remaining stages now (testing)",
+)
+def fast_forward(order_id: str, user: AuthenticatedUser = Depends(require_user)):
+    """Synchronously advance the shipment through every remaining stage until
+    delivered, in one request.
+
+    This exists so the full workflow can be tested end-to-end WITHOUT waiting
+    for the timed Celery auto-advance (which also can't fire while a free-tier
+    container is asleep). Each step still writes the order-status transition to
+    the backend and notifies the delivery service, exactly like the timed path.
+    """
+    state = state_store.load_state(order_id)
+    if not state:
+        raise HTTPException(status_code=404, detail="No tracking found for this order.")
+
+    # Bounded loop (max = number of stages) so a bug can never spin forever.
+    for _ in range(len(tracking_service.STAGE_ORDER)):
+        result = orchestrator.advance(order_id, user.access_token, force=True)
+        if not result.get("advanced"):
+            break
+        if result.get("status") == "delivered":
+            break
+
+    return tracking_service.hydrate(state_store.load_state(order_id))
