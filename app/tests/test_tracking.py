@@ -88,6 +88,36 @@ def test_advance_unknown_order(_memory_state_store):
     assert result["advanced"] is False
 
 
+def test_advance_caps_consecutive_holds(_memory_state_store):
+    """If the LLM keeps choosing 'hold', the order must still progress: one hold
+    is allowed, then the deterministic next stage is forced."""
+    tracking_service.start_tracking("o8", ADDR)
+    # FakeLLM always says stay at 'pending'.
+    holds = FakeLLM([
+        text_completion('{"next_status": "pending", "note": "too early"}'),
+        text_completion('{"next_status": "pending", "note": "still early"}'),
+    ])
+    with patch("app.core.llm.get_llm_client", return_value=holds), \
+         patch("app.core.backend_client.update_order_status", return_value=True), \
+         patch("app.core.delivery_client.notify_checkpoint", return_value=True):
+        first = orchestrator.advance("o8")   # allowed hold
+        second = orchestrator.advance("o8")  # forced advance
+    assert first["advanced"] is False
+    assert second["advanced"] is True
+    assert second["status"] == "dispatched"
+
+
+def test_force_advance_ignores_llm_hold(_memory_state_store):
+    tracking_service.start_tracking("o8f", ADDR)
+    hold = FakeLLM([text_completion('{"next_status": "pending", "note": "too early"}')])
+    with patch("app.core.llm.get_llm_client", return_value=hold), \
+         patch("app.core.backend_client.update_order_status", return_value=True), \
+         patch("app.core.delivery_client.notify_checkpoint", return_value=True):
+        res = orchestrator.advance("o8f", force=True)
+    assert res["advanced"] is True
+    assert res["status"] == "dispatched"
+
+
 # ── Endpoints ──────────────────────────────────────────────────────────────
 
 def test_start_requires_auth():
@@ -135,3 +165,20 @@ def test_advance_endpoint(_memory_state_store):
         resp = client.post("/tracking/o7/advance", headers=auth_header())
     assert resp.status_code == 200
     assert resp.json()["status"] == "dispatched"
+
+
+def test_fast_forward_reaches_delivered(_memory_state_store):
+    client.post(
+        "/tracking/start",
+        json={"order_id": "off1", "destination_address": ADDR, "auto_advance": False},
+        headers=auth_header(),
+    )
+    with patch("app.core.backend_client.update_order_status", return_value=True), \
+         patch("app.core.delivery_client.notify_checkpoint", return_value=True):
+        resp = client.post("/tracking/off1/fast-forward", headers=auth_header())
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "delivered"
+    # All five stages present in the checkpoint history.
+    statuses = [c["status"] for c in body["checkpoints"]]
+    assert statuses == ["pending", "dispatched", "in_transit", "out_for_delivery", "delivered"]

@@ -61,6 +61,15 @@ class Settings(BaseSettings):
     GOOGLE_MAPS_USE_MOCK: bool = True
 
     # ------------------------------------------------------------------
+    # Dispatch lead time (hours) used when projecting the delivery ETA.
+    # The parcel isn't shipped the instant an order is placed — it's dispatched
+    # from the store first. The ETA is therefore (now + dispatch lead + travel
+    # time), which keeps the ETA AFTER the dispatch time shown by the delivery
+    # bot. Set this to roughly match the delivery bot's standard dispatch SLA.
+    # ------------------------------------------------------------------
+    DISPATCH_LEAD_HOURS: int = 24
+
+    # ------------------------------------------------------------------
     # Auth — validates JWT access tokens issued by the Django backend.
     # JWT_SECRET MUST equal the Django backend's SECRET_KEY (HS256).
     # ------------------------------------------------------------------

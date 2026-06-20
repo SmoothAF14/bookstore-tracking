@@ -78,8 +78,13 @@ def _llm_next_stage(state: dict, fallback: str) -> tuple[str, str | None]:
     return fallback, None
 
 
-def advance(order_id: str, access_token: str | None = None) -> dict:
-    """Advance tracking one step for an order. Returns a result dict."""
+def advance(order_id: str, access_token: str | None = None, force: bool = False) -> dict:
+    """Advance tracking one step for an order. Returns a result dict.
+
+    When `force` is True, the deterministic next stage is used directly and the
+    LLM "stay at current stage" decision is bypassed — used by the test
+    fast-forward path so every call makes guaranteed forward progress.
+    """
     state = state_store.load_state(order_id)
     if not state:
         return {"order_id": order_id, "advanced": False, "status": "unknown",
@@ -95,12 +100,27 @@ def advance(order_id: str, access_token: str | None = None) -> dict:
         return {"order_id": order_id, "advanced": False, "status": current,
                 "message": "No further stages."}
 
-    chosen, note = _llm_next_stage(state, deterministic_next)
+    if force:
+        chosen, note = deterministic_next, None
+    else:
+        chosen, note = _llm_next_stage(state, deterministic_next)
 
-    # If the LLM chose to stay put, treat as no-op this tick.
+    # If the LLM chose to stay put, allow it to hold the shipment briefly — but
+    # never indefinitely. Without a real elapsed-time signal the LLM can keep
+    # answering "too early" forever, which is exactly what strands an order at
+    # 'pending'. So we permit a single hold, then force the deterministic next
+    # stage on the following tick. This keeps the LLM's pacing influence while
+    # guaranteeing the async auto-advance chain always progresses.
     if chosen == current:
-        return {"order_id": order_id, "advanced": False, "status": current,
-                "message": "Holding at current stage."}
+        holds = int(state.get("_holds", 0))
+        if holds >= 1:
+            chosen, note = deterministic_next, "Auto-advanced after hold."
+        else:
+            state["_holds"] = holds + 1
+            state["updated_at"] = datetime.utcnow().isoformat()
+            state_store.save_state(order_id, state)
+            return {"order_id": order_id, "advanced": False, "status": current,
+                    "message": "Holding at current stage."}
 
     route = tracking_service.get_route_for_state(state)
     now = datetime.utcnow()
@@ -115,6 +135,7 @@ def advance(order_id: str, access_token: str | None = None) -> dict:
     state["status"] = chosen
     state["order_status"] = STATUS_TO_ORDER_STATUS[chosen]
     state["updated_at"] = now.isoformat()
+    state["_holds"] = 0  # reset hold allowance for the new stage
     state_store.save_state(order_id, state)
 
     # Persist the order-status transition + notify delivery (best-effort).
