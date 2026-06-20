@@ -71,6 +71,7 @@ class TrackingStateResponse(BaseModel):
     order_status: str = Field(..., description="Corresponding Django order status")
     origin: Optional[str] = None
     destination: Optional[str] = None
+    destination_address: Optional[str] = Field(None, description="Full delivery address (for geocoding)")
     distance_km: Optional[float] = None
     eta: Optional[datetime] = Field(None, description="Estimated delivery time")
     # Geo points for map rendering (mock coordinates, real map tiles client-side).
