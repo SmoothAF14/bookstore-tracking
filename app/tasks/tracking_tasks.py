@@ -34,7 +34,7 @@ def advance_tracking(order_id: str, access_token: str | None = None, auto: bool 
 @celery_app.task(name="tracking.recompute_eta")
 def recompute_eta(order_id: str):
     """Refresh the mock ETA for an in-flight order (no-op if delivered)."""
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
     from app.services import tracking_service
 
     state = state_store.load_state(order_id)
@@ -42,12 +42,21 @@ def recompute_eta(order_id: str):
         return {"order_id": order_id, "updated": False}
 
     route = tracking_service.get_route_for_state(state)
-    # Match start_tracking: while still pending the ETA includes the dispatch
-    # lead; once the parcel is dispatched, the lead has already elapsed so the
-    # remaining ETA is just travel time. Either way it never precedes dispatch.
-    from app.core.config import settings
-    lead = settings.DISPATCH_LEAD_HOURS if state.get("status") == "pending" else 0
-    eta = datetime.utcnow() + timedelta(hours=lead + route.duration_hours)
+    now = datetime.utcnow()
+    # Anchor to the stored tier-based dispatch time (from the delivery bot) when
+    # still pending; once dispatched, the remaining ETA is just travel time.
+    if state.get("status") == "pending" and state.get("dispatch_at"):
+        try:
+            base = datetime.fromisoformat(str(state["dispatch_at"]).replace("Z", "+00:00"))
+            if base.tzinfo is not None:
+                base = base.astimezone(timezone.utc).replace(tzinfo=None)
+            base = max(base, now)
+        except ValueError:
+            from app.core.config import settings
+            base = now + timedelta(hours=settings.DISPATCH_LEAD_HOURS)
+    else:
+        base = now
+    eta = base + timedelta(hours=route.duration_hours)
     state["eta"] = eta.isoformat()
     state_store.save_state(order_id, state)
     return {"order_id": order_id, "updated": True, "eta": state["eta"]}

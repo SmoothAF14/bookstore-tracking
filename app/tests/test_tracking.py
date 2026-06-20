@@ -44,6 +44,23 @@ def test_start_tracking_creates_pending_checkpoint(_memory_state_store):
     assert state["destination"]
 
 
+def test_eta_anchored_to_delivery_dispatch_time(_memory_state_store):
+    """ETA must be the delivery bot's dispatch time + travel, so arrival is
+    never before dispatch — for any tier."""
+    from datetime import datetime, timedelta
+
+    dispatch = datetime(2026, 6, 25, 12, 0)  # well in the future
+    with patch("app.core.delivery_client.get_dispatch_eta", return_value=dispatch):
+        state = tracking_service.start_tracking("o_eta", ADDR)
+
+    eta = datetime.fromisoformat(state["eta"])
+    # ETA strictly after dispatch (travel time > 0).
+    assert eta > dispatch
+    # And exactly dispatch + travel time.
+    expected = dispatch + timedelta(hours=state["duration_hours"])
+    assert abs((eta - expected).total_seconds()) < 1
+
+
 # ── orchestrator.advance ───────────────────────────────────────────────────
 
 def test_advance_uses_deterministic_fallback_without_llm(_memory_state_store):

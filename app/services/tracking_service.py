@@ -6,7 +6,7 @@ data, and produces the ordered checkpoint sequence the shipment moves through.
 The orchestrator drives advancing between stages.
 """
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.core import maps_client, state_store
 from app.core.config import settings
@@ -79,18 +79,34 @@ def build_checkpoint(status: str, route, when: datetime | None = None) -> dict:
     }
 
 
-def start_tracking(order_id: str, destination_address: str) -> dict:
+def start_tracking(order_id: str, destination_address: str, access_token: str | None = None) -> dict:
     """Initialise tracking state for an order and persist it.
 
     Creates the route + ETA from mock maps and the first ('pending') checkpoint.
     Returns the new state dict.
+
+    The ETA is anchored to the DELIVERY bot's tier-based dispatch time (pulled
+    via the delivery client) plus travel time, so arrival can never precede
+    dispatch — regardless of the order's tier (express/standard/bulk). If the
+    delivery service is unreachable, we fall back to a flat DISPATCH_LEAD_HOURS.
     """
+    from app.core import delivery_client
+
     route = maps_client.get_route(destination_address)
     now = datetime.utcnow()
-    # ETA = dispatch lead time (parcel leaves the store) + travel time. Anchoring
-    # to dispatch (not "now") keeps the ETA AFTER the delivery bot's dispatch
-    # time — an order can't arrive before it's dispatched.
-    eta = now + timedelta(hours=settings.DISPATCH_LEAD_HOURS + route.duration_hours)
+
+    # Prefer the delivery bot's actual dispatch time (single source of truth for
+    # dispatch timing). Fall back to a flat lead time if it's unavailable.
+    dispatch_at = delivery_client.get_dispatch_eta(order_id, access_token)
+    if dispatch_at is not None:
+        # Normalise to naive UTC to match the rest of this module's datetimes.
+        if dispatch_at.tzinfo is not None:
+            dispatch_at = dispatch_at.astimezone(timezone.utc).replace(tzinfo=None)
+        # Never let a stale/past dispatch time pull the ETA before "now".
+        dispatch_at = max(dispatch_at, now)
+        eta = dispatch_at + timedelta(hours=route.duration_hours)
+    else:
+        eta = now + timedelta(hours=settings.DISPATCH_LEAD_HOURS + route.duration_hours)
 
     first = build_checkpoint("pending", route, now)
     first["label"] = STAGE_LABELS["pending"]
@@ -106,6 +122,7 @@ def start_tracking(order_id: str, destination_address: str) -> dict:
         "distance_km": route.distance_km,
         "duration_hours": route.duration_hours,
         "eta": eta.isoformat(),
+        "dispatch_at": dispatch_at.isoformat() if dispatch_at is not None else None,
         "destination_address": destination_address,
         "checkpoints": [first],
         "updated_at": now.isoformat(),
