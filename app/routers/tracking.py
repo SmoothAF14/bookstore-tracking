@@ -46,7 +46,7 @@ def start_tracking(
             detail="No delivery address found for this order. Provide destination_address.",
         )
 
-    state = tracking_service.start_tracking(request.order_id, destination)
+    state = tracking_service.start_tracking(request.order_id, destination, user.access_token)
 
     if request.auto_advance:
         try:
